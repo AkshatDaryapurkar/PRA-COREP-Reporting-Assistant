@@ -95,11 +95,6 @@ class LLMClient:
             # But let's keep it simple and consistent with previous logic for now.
             
             response_text = self.generate_response(system_prompt, full_user_prompt, temperature)
-            
-            # Debug print
-            # print(f"\n[DEBUG] Raw LLM Response:\n{response_text}\n[DEBUG] End Response\n")
-            
-            # Clean up potential markdown blocks like ```json ... ```
             return self._extract_json(response_text)
         except Exception as e:
             print(f"Error generating JSON: {e}")
@@ -107,27 +102,32 @@ class LLMClient:
     
     @staticmethod
     def _extract_json(text: str) -> Optional[dict]:
-        """Extract JSON from response text, handling markdown code blocks."""
+        """Extract JSON from response text, handling markdown code blocks and loose formatting."""
         if not text:
             return None
             
-        # Try to find JSON in markdown code block
-        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
-        if json_match:
-            json_str = json_match.group(1)
-        else:
-            # Try the raw text
-            json_str = text.strip()
+        # Clean up the text
+        json_str = text.strip()
         
+        # 1. Try to find JSON in markdown code block
+        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', json_str)
+        if json_match:
+            json_str = json_match.group(1).strip()
+        
+        # 2. Try direct parsing
         try:
             return json.loads(json_str)
         except json.JSONDecodeError:
-            # Try to find anything that looks like JSON object
-            obj_match = re.search(r'\{[\s\S]*\}', json_str)
+            # 3. Try finding anything between braces { ... }
+            obj_match = re.search(r'(\{[\s\S]*\})', json_str)
             if obj_match:
                 try:
-                    return json.loads(obj_match.group())
-                except json.JSONDecodeError:
-                    pass
+                    return json.loads(obj_match.group(1))
+                except json.JSONDecodeError as e:
+                    print(f"❌ JSON Parsing Error: {e}")
+                    print(f"RAW RESPONSE START:\n{text}\nRAW RESPONSE END")
+            else:
+                print("❌ No JSON object found in response")
+                print(f"RAW RESPONSE START:\n{text}\nRAW RESPONSE END")
         
         return None

@@ -68,15 +68,23 @@ with st.sidebar:
         "and generates compliant data structures based on your input."
     )
 
+# Helper: Rule Text Map
+from knowledge_base.corpus import REGULATORY_CORPUS
+CORPUS_MAP = {chunk["id"]: f"{chunk['source']} {chunk['paragraph']}: {chunk['text']}" for chunk in REGULATORY_CORPUS}
+
 # Main Content
 st.markdown('<div class="main-header">🏦 PRA COREP Reporting Assistant</div>', unsafe_allow_html=True)
-st.markdown("Ask questions about regulatory reporting and generate valid return data.")
+st.markdown(
+    "Describes your capital position and scenarios. "
+    "The assistant will interpret PRA rules to check eligibility and compliance."
+)
 
 # Input Query
 query = st.text_area(
     "Describe your reporting scenario:",
-    value="How should a UK bank report its Common Equity Tier 1 capital under PRA COREP Own Funds?",
-    height=100
+    value="I have £1,000m in paid-up ordinary shares, £200m in retained earnings, and £50m in intangible assets. I also issued £150m in perpetual bonds that are callable after 5 years.",
+    height=120,
+    help="Enter details about your capital instruments, reserves, and deductions."
 )
 
 if st.button("Generate Report", type="primary"):
@@ -85,56 +93,43 @@ if st.button("Generate Report", type="primary"):
             # Run Pipeline
             output: CorepOutput = pipeline.run(query)
             
-            # Key Metrics Row
-            st.markdown("### 📊 Key Capital Figures")
+            # --- High Level Summary Metrics ---
+            st.markdown("### 📊 Regulatory Capital Position")
             c1, c2, c3, c4 = st.columns(4)
-            
-            with c1:
-                st.metric("CET1 Capital", f"£{output.own_funds.common_equity_tier_1:,.2f}m")
-            with c2:
-                st.metric("AT1 Capital", f"£{output.own_funds.additional_tier_1:,.2f}m")
-            with c3:
-                st.metric("Tier 2 Capital", f"£{output.own_funds.tier_2:,.2f}m")
-            with c4:
-                st.metric("Total Own Funds", f"£{output.own_funds.total_own_funds:,.2f}m")
+            c1.metric("CET1 Capital", f"£{output.own_funds.common_equity_tier_1:,.2f}m")
+            c2.metric("AT1 Capital", f"£{output.own_funds.additional_tier_1:,.2f}m")
+            c3.metric("Tier 2 Capital", f"£{output.own_funds.tier_2:,.2f}m")
+            c4.metric("Total Own Funds", f"£{output.own_funds.total_own_funds:,.2f}m")
             
             st.markdown("---")
             
-            # Tabs for detailed view
-            tab1, tab2, tab3 = st.tabs(["📝 Audit Log", "⚠️ Validations", "🔍 Raw Data"])
+            # --- Detailed Breakdown & Reasoning ---
+            st.subheader("📝 Regulatory Analysis & Reasoning")
             
-            with tab1:
-                st.subheader("Decision Audit Log")
-                
-                audit_data = []
-                for log in output.audit_log:
-                    audit_data.append({
-                        "Field": log.field,
-                        "Value": log.value,
-                        "Explanation": log.explanation,
-                        "Rules": ", ".join(log.rule_ids)
-                    })
-                
-                df_audit = pd.DataFrame(audit_data)
-                st.dataframe(
-                    df_audit, 
-                    use_container_width=True,
-                    column_config={
-                        "Explanation": st.column_config.TextColumn("Reasoning", width="large"),
-                        "Value": st.column_config.NumberColumn("Value (£m)")
-                    }
-                )
+            # Sort audit log by specific order if possible
+            # We want CET1 -> AT1 -> T2 -> Total
             
-            with tab2:
-                st.subheader("Validation Warnings")
-                if output.warnings:
-                    for warning in output.warnings:
-                        st.warning(f"⚠️ {warning}")
-                else:
-                    st.success("✅ No validation warnings found. Data is compliant.")
-            
-            with tab3:
-                st.subheader("JSON Structure")
+            for item in output.audit_log:
+                # Create a readable card for each item
+                with st.expander(f"🔹 {item.field.replace('_', ' ').title()} = £{item.value:,.2f}m", expanded=True):
+                    st.markdown(f"**Reasoning:** {item.explanation}")
+                    
+                    if item.rule_ids:
+                        st.markdown("**📜 Applied Regulatory Rules:**")
+                        for rule_id in item.rule_ids:
+                            rule_text = CORPUS_MAP.get(rule_id, "Rule text not found.")
+                            st.info(f"**{rule_id}**: {rule_text}")
+
+            # --- Validation Section ---
+            if output.warnings:
+                st.error("⚠️ Compliance Warnings Detected")
+                for warning in output.warnings:
+                    st.markdown(f"- {warning}")
+            else:
+                st.success("✅ All data passes basic validation checks.")
+
+            # --- Raw Data Tab ---
+            with st.expander("🔍 View Raw API Output (JSON)"):
                 st.json(output.model_dump())
                 
         except Exception as e:
